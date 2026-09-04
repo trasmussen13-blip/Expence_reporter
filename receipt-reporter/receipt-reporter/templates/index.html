@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.ico" />
+    <title>Kvitteringer · Månedsoverblik</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/">
+          <span class="brand-mark">K</span>
+          <span>
+            <strong>Kvitteringer</strong>
+            <small>Månedsrapport</small>
+          </span>
+        </a>
+        <div class="account-area">
+          <div class="account-meta">
+            <strong>{{ user.display_name }}</strong>
+            <small>{{ user.email }}</small>
+          </div>
+          <a class="logout-link" href="/logout">Log ud</a>
+          <div class="month-chip">
+            <span class="status-dot"></span>
+            <span>Aktiv måned</span>
+            <strong>{{ today[0:7] }}</strong>
+          </div>
+        </div>
+      </header>
+
+      {% if request.args.get('template_saved') %}
+        <div class="toast success">Skabelonen er gemt og klar til brug.</div>
+      {% endif %}
+      {% if request.args.get('processed') %}
+        <div class="toast success">{{ request.args.get('processed') }} kvittering(er) er tilføjet. Kontroller felterne før eksport.</div>
+      {% endif %}
+      {% if request.args.get('upload_error') %}
+        <div class="toast error">{{ request.args.get('upload_error') }}</div>
+      {% endif %}
+      {% if request.args.get('profile_saved') %}
+        <div class="toast success">Rapportmasterens navn er gemt.</div>
+      {% endif %}
+      {% if request.args.get('profile_error') %}
+        <div class="toast error">{{ request.args.get('profile_error') }}</div>
+      {% endif %}
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">MÅNEDENS ARBEJDSFLØDE</p>
+            <h1>Fra kvittering til<br /><em>færdig rapport.</em></h1>
+            <p class="hero-copy">Upload billeder, lad AI læse detaljerne, ret det der skal rettes, og download en rapport i din originale Excel-skabelon.</p>
+          </div>
+          <div class="hero-note">
+            <span class="note-icon">↳</span>
+            <p>Din skabelon og dine kvitteringer bliver på denne app. Intet bliver overskrevet før du eksporterer.</p>
+          </div>
+        </section>
+
+        <section class="stats-grid">
+          <article class="stat-card">
+            <span class="stat-label">Skabelon</span>
+            <strong>{{ "Klar" if template_exists else "Mangler" }}</strong>
+            <span class="stat-foot">{{ "Original Excel bevaret" if template_exists else "Upload .xlsx for at starte" }}</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Kvitteringer</span>
+            <strong>{{ receipts|length }}</strong>
+            <span class="stat-foot">I denne måned</span>
+          </article>
+          <article class="stat-card accent">
+            <span class="stat-label">Samlet beløb</span>
+            <strong>{{ "{:,.2f}".format(total).replace(",", "X").replace(".", ",").replace("X", ".") }} kr.</strong>
+            <span class="stat-foot">Heraf moms: {{ "{:,.2f}".format(vat_total).replace(",", "X").replace(".", ",").replace("X", ".") }} kr.</span>
+          </article>
+        </section>
+
+        <section class="workspace-grid">
+          <div class="main-column">
+            <section class="panel upload-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">01 · INDLÆSNING</p>
+                  <h2>Tilføj kvitteringer</h2>
+                </div>
+                <span class="step-pill">AI-udtræk</span>
+              </div>
+              <form action="/process" method="post" enctype="multipart/form-data" id="receipt-form">
+                <label class="dropzone" for="receipt-input">
+                  <span class="upload-symbol">↑</span>
+                  <span class="drop-title">Træk billeder hertil</span>
+                  <span class="drop-copy">eller klik for at vælge flere kvitteringer</span>
+                  <span class="file-types">PNG · JPG · JPEG · maks. 50 MB samlet</span>
+                  <input id="receipt-input" type="file" name="receipts" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple />
+                </label>
+                <div id="selected-files" class="selected-files"></div>
+                <button class="button button-primary upload-submit" type="submit">
+                  <span>Læs kvitteringer med AI</span><span>→</span>
+                </button>
+                <div id="ai-loading" class="ai-loading" hidden>
+                  <span class="loading-dot"></span>
+                  <span>Tænker... Den lokale LLM analyserer billedet på din servers CPU. Dette kan tage 10-25 sekunder...</span>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel review-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">02 · KONTROL</p>
+                  <h2>Gennemgå data</h2>
+                </div>
+                <span class="muted">{{ receipts|length }} linjer</span>
+              </div>
+              {% if receipts %}
+              <div class="table-wrap">
+                <table id="receipt-table">
+                  <thead>
+                    <tr>
+                      <th>Dato</th>
+                      <th>Butik / leverandør</th>
+                      <th>Kategori</th>
+                      <th>Beløb</th>
+                      <th>Moms / VAT</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for receipt in receipts %}
+                    <tr data-id="{{ receipt.id }}">
+                      <td><input data-field="date" type="date" value="{{ receipt.receipt_date or '' }}" /></td>
+                      <td><input data-field="vendor" class="vendor-input" type="text" value="{{ receipt.vendor or '' }}" placeholder="Fx Circle K" /></td>
+                      <td>
+                        <select data-field="category">
+                          {% for key, label in categories.items() %}
+                            <option value="{{ key }}" {% if receipt.category == key %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                      </td>
+                      <td><div class="amount-input"><input data-field="amount" type="number" step="0.01" value="{{ receipt.amount if receipt.amount is not none else '' }}" placeholder="0,00" /><span>kr.</span></div></td>
+                      <td><div class="amount-input" title="Momsbeløb i kroner"><input data-field="vat" type="number" min="0" step="0.01" value="{{ receipt.vat if receipt.vat is not none else '' }}" placeholder="0,00" /><span>kr.</span></div></td>
+                      <td class="row-actions"><button class="icon-button delete-row" title="Slet række" type="button">×</button></td>
+                    </tr>
+                    {% if receipt.extraction_note %}
+                      <tr class="note-row" data-note-for="{{ receipt.id }}"><td colspan="6"><span class="warning-dot"></span>{{ receipt.extraction_note }}</td></tr>
+                    {% endif %}
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="review-footer">
+                <p><span class="checkmark">✓</span> Beløb er brutto inkl. moms. Ved eksport skrives netto på kontoen og moms i VAT 25%.</p>
+                <button class="button button-secondary" id="save-changes" type="button">Gem rettelser</button>
+              </div>
+              {% else %}
+              <div class="empty-state">
+                <div class="empty-icon">✦</div>
+                <h3>Ingen kvitteringer endnu</h3>
+                <p>Upload dine første billeder ovenfor. De dukker op her, så snart AI-udtrækket er færdigt.</p>
+              </div>
+              {% endif %}
+            </section>
+          </div>
+
+          <aside class="side-column">
+            <section class="panel profile-panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">RAPPORTMASTER</p>
+                  <h2>Dit navn i rapporten</h2>
+                </div>
+              </div>
+              <form action="/profile" method="post">
+                <label class="field-label" for="report-master-name">Navn</label>
+                <input id="report-master-name" name="report_master_name" type="text" maxlength="120" required value="{{ user.report_master_name }}" placeholder="Fx Anne Jensen" />
+                <button class="button button-outline full-button profile-save" type="submit">Gem navn</button>
+              </form>
+            </section>
+            <section class="panel template-panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">SKABELON</p>
+                  <h2>Din Excel-fil</h2>
+                </div>
+                <span class="file-icon">XLSX</span>
+              </div>
+              <div class="template-status {{ 'ready' if template_exists else 'missing' }}">
+                <span class="status-check">{{ "✓" if template_exists else "!" }}</span>
+                <div>
+                  <strong>{{ "Officiel skabelon aktiv" if template_exists else "Upload skabelon" }}</strong>
+                  <small>{{ "Formler og formatering bevares" if template_exists else "Kun .xlsx eller .xlsm" }}</small>
+                </div>
+              </div>
+              <form action="/template" method="post" enctype="multipart/form-data">
+                <label class="button button-outline full-button" for="template-input">{{ "Udskift skabelon" if template_exists else "Vælg Excel-skabelon" }}</label>
+                <input class="visually-hidden" id="template-input" type="file" name="template" accept=".xlsx,.xlsm" onchange="this.form.submit()" />
+              </form>
+            </section>
+
+            <section class="panel export-panel">
+              <p class="eyebrow">03 · EKSPORT</p>
+              <h2>Klar til månedsafslutning?</h2>
+              <p>Du får én ZIP med den udfyldte Excel-rapport og en mappe med alle originale kvitteringsbilleder.</p>
+              <button id="close-month" class="button button-dark full-button" type="button">
+                <span>Afslut Måned</span><span>↓</span>
+              </button>
+              <button id="export-excel" class="text-button" type="button">Download kun Excel →</button>
+              <div id="download-result" class="download-result" hidden></div>
+            </section>
+
+            <section class="tip-card">
+              <span class="tip-mark">i</span>
+              <div>
+                <strong>Sådan bevares layoutet</strong>
+                <p>Appen bruger din uploadede fil som base og skriver kun i de næste tomme datarækker. Overskrifter, celleformater, formler og signaturfelter røres ikke.</p>
+              </div>
+            </section>
+          </aside>
+        </section>
+      </main>
+      <footer>KVITTERINGER · ENKELT, KONTROLLERET, KLAR</footer>
+    </div>
+    <script>
+      const input = document.getElementById("receipt-input");
+      const selected = document.getElementById("selected-files");
+      const form = document.getElementById("receipt-form");
+      const aiLoading = document.getElementById("ai-loading");
+      const saveButton = document.getElementById("save-changes");
+      const closeButton = document.getElementById("close-month");
+      const excelButton = document.getElementById("export-excel");
+      const resultBox = document.getElementById("download-result");
+
+      if (input) {
+        input.addEventListener("change", () => {
+          selected.innerHTML = "";
+          const files = [...input.files];
+          const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+          if (totalSize > 50 * 1024 * 1024) {
+            selected.innerHTML = `<span class="file-pill error-pill">Filerne er samlet større end 50 MB</span>`;
+            input.value = "";
+            return;
+          }
+          files.forEach(file => {
+            const pill = document.createElement("span");
+            pill.className = "file-pill";
+            pill.textContent = file.name;
+            selected.appendChild(pill);
+          });
+        });
+      }
+
+      form?.addEventListener("submit", (event) => {
+        if (!input.files.length) {
+          event.preventDefault();
+          alert("Vælg mindst ét kvitteringsbillede først.");
+          return;
+        }
+        const button = form.querySelector("button");
+        button.disabled = true;
+        button.querySelector("span").textContent = "Læser kvitteringer…";
+        if (aiLoading) aiLoading.hidden = false;
+      });
+
+      function rowPayload(row) {
+        const value = field => row.querySelector(`[data-field="${field}"]`)?.value || "";
+        return { date: value("date"), vendor: value("vendor"), category: value("category"), amount: value("amount"), vat: value("vat") };
+      }
+
+      saveButton?.addEventListener("click", async () => {
+        saveButton.disabled = true;
+        saveButton.textContent = "Gemmer…";
+        const rows = [...document.querySelectorAll("#receipt-table tbody tr[data-id]")];
+        await Promise.all(rows.map(row => fetch(`/receipt-actions/receipts/${row.dataset.id}`, {
+          method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(rowPayload(row))
+        })));
+        window.location.reload();
+      });
+
+      document.querySelectorAll(".delete-row").forEach(button => {
+        button.addEventListener("click", async () => {
+          const row = button.closest("tr");
+          if (!confirm("Slet denne kvittering?")) return;
+          await fetch(`/receipt-actions/receipts/${row.dataset.id}`, {method: "DELETE"});
+          window.location.reload();
+        });
+      });
+
+      async function download(url, filename) {
+        const response = await fetch(url);
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({error: "Ukendt fejl"}));
+          throw new Error(data.error || "Kunne ikke oprette filen");
+        }
+        const blob = await response.blob();
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+      }
+
+      excelButton?.addEventListener("click", async () => {
+        excelButton.disabled = true;
+        excelButton.textContent = "Opretter Excel…";
+        try { await download("/receipt-actions/export", "kvitteringsrapport.xlsx"); }
+        catch (error) { alert(error.message); }
+        finally { excelButton.disabled = false; excelButton.textContent = "Download kun Excel →"; }
+      });
+
+      closeButton?.addEventListener("click", async () => {
+        closeButton.disabled = true;
+        closeButton.querySelector("span").textContent = "Pakker måneden…";
+        try {
+          await download("/receipt-actions/close-month", "kvitteringer.zip");
+          resultBox.hidden = false;
+          resultBox.innerHTML = `<strong>ZIP hentet.</strong><br /><span>Vil du rydde den aktive måned?</span><button id="reset-month" class="reset-button" type="button">Start ny måned</button>`;
+          document.getElementById("reset-month").addEventListener("click", async () => {
+            if (!confirm("Dette sletter den aktive måneds kvitteringer fra appen. ZIP-filen er allerede hentet. Fortsæt?")) return;
+            await fetch("/receipt-actions/reset", {method: "POST"});
+            window.location.reload();
+          });
+        } catch (error) { alert(error.message); }
+        finally { closeButton.disabled = false; closeButton.querySelector("span").textContent = "Afslut Måned"; }
+      });
+    </script>
+  </body>
+</html>

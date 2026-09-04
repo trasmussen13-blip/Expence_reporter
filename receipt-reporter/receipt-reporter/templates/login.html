@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.ico" />
+    <title>Log ind · Kvitteringer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+  </head>
+  <body>
+    <div class="shell login-shell">
+      <header class="topbar">
+        <a class="brand" href="/">
+          <span class="brand-mark">K</span>
+          <span>
+            <strong>Kvitteringer</strong>
+            <small>Månedsrapport</small>
+          </span>
+        </a>
+      </header>
+      <main class="login-main">
+        <section class="login-card panel">
+          <p class="eyebrow">SIKKER ADGANG</p>
+          <h1>Din rapport.<br /><em>Dit overblik.</em></h1>
+          <p class="login-copy">Log ind for at se dine egne kvitteringer og holde dine månedsrapporter adskilt fra andre brugere.</p>
+          {% if error %}
+            <div class="toast error">{{ error }}</div>
+          {% endif %}
+          <div class="login-actions">
+            <a class="button button-dark full-button {% if not configured.google %}disabled-link{% endif %}" href="{{ url_for('start_login', provider='google') }}">
+              <span>Fortsæt med Google</span><span>→</span>
+            </a>
+            <a class="button button-outline full-button {% if not configured.microsoft %}disabled-link{% endif %}" href="{{ url_for('start_login', provider='microsoft') }}">
+              <span>Fortsæt med Microsoft</span><span>→</span>
+            </a>
+          </div>
+          {% if not configured.google and not configured.microsoft %}
+            <div class="setup-note">
+              <strong>Login skal konfigureres på serveren</strong>
+              <p>Sæt Google- eller Microsoft OAuth-klientvariablerne i serverens miljø. Se <code>LOCAL_SERVER.md</code>.</p>
+            </div>
+          {% endif %}
+          <p class="local-note">Dine kvitteringer gemmes lokalt på denne server.</p>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
